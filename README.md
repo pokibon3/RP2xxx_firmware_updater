@@ -70,8 +70,8 @@ PyInstaller で単体アプリにします。各 OS 上でビルドしてくだ�
 
 | OS | コマンド | 出力 |
 |---|---|---|
-| Windows | `app\build_win.bat` | `app\dist\RP2xxx Updater.exe` |
-| macOS | `app/build_mac.sh` | `app/dist/RP2xxx Updater.app`、配布用 `app/dist/RP2xxx-Updater-mac.zip` |
+| Windows | `app\build_win.bat` | `app\dist\win\RP2xxx Updater.exe`、配布用 `app\dist\win\RP2xxx-Updater-windows.zip` |
+| macOS | `app/build_mac.sh` | `app/dist/mac/RP2xxx Updater.app`、配布用 `app/dist/mac/RP2xxx-Updater-mac.zip` |
 
 GitHub Actions (`.github/workflows/build-app.yml`) でも両 OS 分を自動ビルドします。
 

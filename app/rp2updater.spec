@@ -1,5 +1,5 @@
-# PyInstaller spec — macOS: dist/RP2xxx Updater.app / Windows: dist/RP2xxx Updater.exe
-#   pyinstaller --noconfirm rp2updater.spec
+# PyInstaller spec — macOS: dist/mac/RP2xxx Updater.app / Windows: dist/win/RP2xxx Updater.exe
+#   build_mac.sh / build_win.bat から --distpath dist/mac|win を付けて実行
 import sys
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
 
