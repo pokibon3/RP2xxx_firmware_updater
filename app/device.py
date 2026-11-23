@@ -137,21 +137,32 @@ def _usb_reset(dev, itf: int) -> None:
 # ------------------------------------------------------------
 #  1200bps タッチ
 # ------------------------------------------------------------
-def _touch_1200(port: str) -> None:
+def _touch_1200(port: str) -> Exception | None:
+    """1200bps で開いて DTR を落として閉じる。
+
+    基板は 1200bps の設定や DTR の変化を受けた瞬間に再起動するので、
+    Windows ではポートの設定中にデバイスが消えてエラー (ERROR_NO_SUCH_DEVICE など) になる。
+    これは正常な動作なので例外は投げずに返し、成否はポートが消えたかどうかで判断する。
+    """
+    s = serial.Serial()
+    s.port = port
+    s.baudrate = 1200
+    s.dtr = True
+    s.rts = True
     try:
-        s = serial.Serial()
-        s.port = port
-        s.baudrate = 1200
-        s.dtr = True
-        s.rts = True
         s.open()
         time.sleep(0.05)
         s.dtr = False
         s.rts = False
         time.sleep(0.05)
-        s.close()
-    except serial.SerialException as e:
-        raise RuntimeError(f'シリアルポート {port} を開けません（他のアプリが使用中？）: {e}') from e
+    except (serial.SerialException, OSError) as e:
+        return e
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+    return None
 
 
 def port_present(dev: Device) -> bool:
@@ -175,9 +186,12 @@ def enter_bootloader(dev: Device, log) -> None:
         log('USB リセットに応答がないため 1200bps を試します', 'warn')
     else:
         log(f'1200bps で書き込みモードへ切り替えます ({dev.port})', 'info')
-    _touch_1200(dev.port)
-    if not _wait_port_gone(dev, 3.0):
-        raise RuntimeError('デバイスが書き込みモードに切り替わりませんでした。'
+    err = _touch_1200(dev.port)
+    if _wait_port_gone(dev, 3.0):
+        return  # 切り替え成功（途中のエラーは再起動によるもの）
+    if err is not None:
+        raise RuntimeError(f'シリアルポート {dev.port} を開けません（他のアプリが使用中？）: {err}')
+    raise RuntimeError('デバイスが書き込みモードに切り替わりませんでした。'
                            'このファームウェアは自動切り替えに対応していない可能性があります。'
                            'BOOTSEL ボタンを押しながら USB を挿し直してください。')
 
