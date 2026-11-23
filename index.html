@@ -248,8 +248,9 @@ const state = {
   port: null,         // 1200bps タッチ用シリアルポート
   portInfo: null,     // 再接続時に同じポートを見つけるための VID/PID
   needSerial: null,   // シリアルポートの許可待ち
+  usedApp: false,     // Reset インターフェースで切り替えたことがある（再接続を待つ）
   fw: null, files: [],
-  drive: null,        // 書き込み先ドライブ (FileSystemDirectoryHandle)
+  drives: [],         // 記憶済みの書き込み先ドライブ (FileSystemDirectoryHandle[])
   busy: false,
   ask: null,          // ユーザーのクリック待ち { label, resolve, reject }
 };
@@ -305,8 +306,8 @@ function updateUI() {
   bd.classList.toggle('primary', !!state.needSerial || !ready);
   bd.disabled = state.busy;
 
-  $('#driveName').textContent = state.drive ? state.drive.name : '未選択（書き込み時に選択）';
-  $('#lnkDrive').hidden = !state.drive || state.busy;
+  $('#driveName').textContent = state.drives.length ? state.drives.map(d => d.name).join(' / ') : '未選択（書き込み時に選択）';
+  $('#lnkDrive').hidden = !state.drives.length || state.busy;
   $('#btnFw').disabled = state.busy;
 
   const bw = $('#btnWrite');
@@ -350,9 +351,15 @@ function idb(mode, fn) {
     };
   });
 }
-const saveDrive  = h => idb('readwrite', s => s.put(h, 'drive')).catch(() => {});
-const loadDrive  = () => idb('readonly', s => s.get('drive')).catch(() => null);
-const forgetDrive = () => idb('readwrite', s => s.delete('drive')).catch(() => {});
+// 書き込みドライブはチップごとに名前が違う (RPI-RP2 / RP2350) ので複数記憶する
+const saveDrives   = () => idb('readwrite', s => s.put(state.drives, 'drives')).catch(() => {});
+const loadDrives   = async () => {
+  const list = await idb('readonly', s => s.get('drives')).catch(() => null);
+  if (Array.isArray(list)) return list;
+  const old = await idb('readonly', s => s.get('drive')).catch(() => null); // 旧バージョンの保存形式
+  return old ? [old] : [];
+};
+const forgetDrives = () => idb('readwrite', s => { s.delete('drives'); s.delete('drive'); }).catch(() => {});
 
 // ============================================================
 //  Drive operations
@@ -368,62 +375,105 @@ async function readDriveInfo(dir) {
   }
 }
 
-/** 記憶済みドライブが現れる（＋書き込み許可が得られる）まで待つ */
-async function waitForDrive(dir, timeoutMs) {
-  const t0 = performance.now();
-  let asked = false;
-  while (performance.now() - t0 < timeoutMs) {
-    let perm;
-    try { perm = await dir.queryPermission({ mode: 'readwrite' }); } catch { perm = 'prompt'; }
-    if (perm !== 'granted') {
-      if (!asked) {
-        await sleep(Math.max(0, 2500 - (performance.now() - t0))); // ドライブのマウント待ち
-        await askClick('ドライブへの書き込みを許可');
-        asked = true;
-      }
-      try { perm = await dir.requestPermission({ mode: 'readwrite' }); } catch { perm = 'error'; }
-      if (perm === 'denied') throw new Error('ドライブへの書き込みが許可されませんでした');
-      if (perm !== 'granted') { await sleep(500); continue; }
-    }
+const drivePerm = async d => { try { return await d.queryPermission({ mode: 'readwrite' }); } catch { return 'prompt'; } };
+
+/** 記憶済みドライブのうち、今つながっていて書き込めるものを探す */
+async function findDrive() {
+  for (const dir of state.drives) {
+    if (await drivePerm(dir) !== 'granted') continue;
     const info = await readDriveInfo(dir);
-    if (info) return info;
-    await sleep(300);
+    if (info) return { dir, info };
   }
   return null;
 }
 
-/** 書き込み先ドライブを用意する（記憶済みなら待つ、無ければ選んでもらう） */
-async function acquireDrive(justReset) {
-  if (state.drive) {
-    setProgress(0.03, 'ドライブを待っています…', state.drive.name);
-    const info = await waitForDrive(state.drive, justReset ? 15000 : 4000);
-    if (info) return { dir: state.drive, info };
-    log(`ドライブ「${state.drive.name}」が見つかりません。` +
-        (justReset ? '' : 'BOOTSEL ボタンを押しながら USB を挿すか、①でデバイスに接続してください。'), 'warn');
-  } else if (justReset) {
-    await sleep(2000); // マウント待ち
+/** 記憶済みドライブの書き込み許可を求める（クリック直後に呼ぶ） */
+async function requestDrivePerms() {
+  for (const d of state.drives) {
+    if (await drivePerm(d) === 'granted') continue;
+    try { await d.requestPermission({ mode: 'readwrite' }); } catch {}
   }
-  for (;;) {
-    log('書き込み先のドライブ (RPI-RP2 / RP2350) を選んでください。次回からは自動で使います。', 'info');
-    if (/Mac/i.test(navigator.platform)) {
-      log('Mac で一覧に出ない場合: 選択画面で ⌘ + Shift + G を押し、/Volumes/RPI-RP2（RP2350 は /Volumes/RP2350）と入力して「開く」', 'info');
-    }
-    await askClick('書き込み先ドライブを選択');
-    let dir;
-    try {
-      dir = await window.showDirectoryPicker({ id: 'rp2drive', mode: 'readwrite' });
-    } catch (e) {
-      if (e.name === 'AbortError') continue; // 選択キャンセル → もう一度ボタン待ち（中止ボタンで抜ける）
-      throw e;
-    }
-    const info = await readDriveInfo(dir);
-    if (info) {
-      state.drive = dir;
-      saveDrive(dir);
-      updateUI();
-      return { dir, info };
-    }
+}
+
+function addDrive(dir) {
+  state.drives = [...state.drives.filter(d => d.name !== dir.name), dir];
+  saveDrives();
+  updateUI();
+}
+
+/** 待っている間に出したボタンを引っ込める */
+function cancelAsk() {
+  if (!state.ask) return;
+  const a = state.ask;
+  state.ask = null;
+  a.reject(Object.assign(new Error('skip'), { skip: true }));
+  updateUI();
+}
+
+/** 選択画面でドライブを選んでもらう */
+async function pickDrive() {
+  let dir;
+  try {
+    dir = await window.showDirectoryPicker({ id: 'rp2drive', mode: 'readwrite' });
+  } catch (e) {
+    if (e.name === 'AbortError') return null;
+    throw e;
+  }
+  const info = await readDriveInfo(dir);
+  if (!info) {
     log(`「${dir.name}」は書き込みモードのドライブではありません（${DRIVE_INFO_FILE} がありません）`, 'warn');
+    return null;
+  }
+  addDrive(dir);
+  return { dir, info };
+}
+
+/**
+ * 書き込み先ドライブを用意する。
+ * 記憶済みドライブが現れるのを待ちつつ、しばらくしても見つからなければ
+ * 「ドライブを選択」ボタンも出す（待機は続ける）。
+ */
+async function acquireDrive(justReset) {
+  setProgress(0.03, 'ドライブを待っています…', state.drives.map(d => d.name).join(' / '));
+  if (!justReset && !(await findDrive())) {
+    log('書き込みモードのドライブを待っています（BOOTSEL ボタンを押しながら USB を挿してください）', 'info');
+  }
+  const t0 = performance.now();
+  const askAfter = justReset ? (state.drives.length ? 5000 : 2500) : (state.drives.length ? 1500 : 0);
+  let click = null, permAsked = false, hinted = false;
+  for (;;) {
+    const found = await findDrive();
+    if (found) { cancelAsk(); return found; }
+
+    if (!click && performance.now() - t0 >= askAfter) {
+      const needPerm = !permAsked && (await Promise.all(state.drives.map(drivePerm))).some(p => p !== 'granted');
+      if (!needPerm && !hinted) {
+        hinted = true;
+        log('書き込み先のドライブ (RPI-RP2 / RP2350) が見つからない場合は「書き込み先ドライブを選択」で選んでください。次回からは自動で使います。', 'info');
+        if (/Mac/i.test(navigator.platform)) {
+          log('Mac で一覧に出ない場合: 選択画面で ⌘ + Shift + G を押し、/Volumes/RPI-RP2（RP2350 は /Volumes/RP2350）と入力して「開く」', 'info');
+        }
+      }
+      click = { needPerm, done: false, err: null };
+      const c = click;
+      askClick(needPerm ? 'ドライブへの書き込みを許可' : '書き込み先ドライブを選択')
+        .then(() => { c.done = true; }, e => { c.err = e; });
+    }
+
+    if (click?.err) throw click.err;          // 中止ボタン
+    if (click?.done) {                        // クリック直後なので許可ダイアログ / 選択画面を出せる
+      const c = click;
+      click = null;
+      if (c.needPerm) {
+        permAsked = true;
+        await requestDrivePerms();
+      } else {
+        const r = await pickDrive();
+        if (r) return r;
+      }
+      continue;
+    }
+    await sleep(300);
   }
 }
 
@@ -495,13 +545,13 @@ async function selectDevice() {
     if (e.name !== 'NotFoundError') log(`デバイス選択エラー: ${e.message}`, 'err');
     return;
   }
-  state.app = null; state.port = null; state.portInfo = null; state.needSerial = null;
+  state.app = null; state.port = null; state.portInfo = null; state.needSerial = null; state.usedApp = false;
   const name = dev.productName || `${hex(dev.vendorId, 4)}:${hex(dev.productId, 4)}`;
 
   if (isBootrom(dev)) {
     log(`${name} は既に書き込みモードです。そのまま「書き込み開始」を押してください。`, 'ok');
   } else if (findResetInterface(dev) !== null) {
-    state.app = dev;
+    state.app = dev; state.usedApp = true;
     log(`${name} に接続しました（USB リセットで書き込みモードへ切り替えます）`, 'ok');
   } else if (dev.productId === 0x000c || !hasCdc(dev) || !('serial' in navigator)) {
     log(`${name} は自動で書き込みモードに切り替えられません。` +
@@ -609,15 +659,19 @@ async function startWrite() {
   const t0 = performance.now();
   try {
     // 記憶済みドライブの許可は、クリック直後（ブラウザが許可ダイアログを出せるうち）に取っておく
-    if (state.drive) {
-      try {
-        if (await state.drive.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-          await state.drive.requestPermission({ mode: 'readwrite' });
-        }
-      } catch {}
-    }
+    await requestDrivePerms();
 
-    const justReset = !!(state.app || state.port);
+    // 既に書き込みモードのドライブが出ていれば切り替え不要
+    const already = await findDrive();
+    // 前回の書き込み直後はデバイスが再起動中のことがあるので、戻ってくるまで待つ
+    if (!already && !state.app && !state.port && (state.usedApp || state.portInfo)) {
+      setProgress(0.01, 'デバイスの再接続を待っています…');
+      const t1 = performance.now();
+      while (!state.app && !state.port && performance.now() - t1 < 10000) await sleep(200);
+      if (!state.app && !state.port) log('デバイスが見つかりません。USB を挿し直してください。', 'warn');
+      else await sleep(500); // 列挙直後は CDC / Reset インターフェースが準備中のことがある
+    }
+    const justReset = !already && !!(state.app || state.port);
     if (justReset) await enterBootloader();
 
     const { dir, info } = await acquireDrive(justReset);
@@ -777,8 +831,8 @@ function init() {
   $('#lnkDrive').onclick = e => {
     e.preventDefault();
     if (state.busy) return;
-    state.drive = null;
-    forgetDrive();
+    state.drives = [];
+    forgetDrives();
     log('次回の書き込み時にドライブを選び直します');
     updateUI();
   };
@@ -809,7 +863,7 @@ function init() {
     navigator.usb.getDevices().then(devs => {
       const app = devs.find(d => findResetInterface(d) !== null);
       if (app && !state.app) {
-        state.app = app;
+        state.app = app; state.usedApp = true;
         log(`${app.productName || 'デバイス'} に自動接続しました`, 'ok');
         updateUI();
       }
@@ -820,12 +874,17 @@ function init() {
       if (!state.app && state.portInfo && sameUsb(e.target.getInfo(), state.portInfo)) { state.port = e.target; updateUI(); }
     });
     navigator.serial.addEventListener('disconnect', e => {
-      if (!state.busy && e.target === state.port) { state.port = null; updateUI(); }
+      // 書き込み中でも外す（再起動後に古いポートを掴んだままにしない）。再接続は connect で拾う
+      if (e.target === state.port) { state.port = null; updateUI(); }
     });
   }
 
-  loadDrive().then(h => {
-    if (h && !state.drive) { state.drive = h; log(`前回のドライブを使用: ${h.name}`); updateUI(); }
+  loadDrives().then(list => {
+    if (list.length && !state.drives.length) {
+      state.drives = list;
+      log(`前回のドライブを使用: ${list.map(d => d.name).join(' / ')}`);
+      updateUI();
+    }
   });
 
   updateUI();
