@@ -1,0 +1,64 @@
+# デスクトップアプリ (app/) を Windows / macOS 向けにビルド
+#   - app/ を変更して push / 手動実行: Actions の Artifacts に zip を保存
+#   - v* タグを push: Releases に zip を添付
+name: build-app
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/build-app.yml']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            zip: RP2xxx-Updater-windows.zip
+          - os: macos-latest
+            zip: RP2xxx-Updater-mac.zip
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Smoke test (import)
+        run: python -c "import uf2, drive, device; print(device.list_devices(), drive.find_drives())"
+
+      - name: Build
+        run: pyinstaller --noconfirm rp2updater.spec
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/RP2xxx Updater.exe" -DestinationPath "dist/${{ matrix.zip }}"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent "dist/RP2xxx Updater.app" "dist/${{ matrix.zip }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip }}
+          path: app/dist/${{ matrix.zip }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/dist/${{ matrix.zip }}

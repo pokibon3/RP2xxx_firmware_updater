@@ -5,7 +5,7 @@ RP2040 / RP2350 基板にファームウェア (`.uf2` / `.bin`) を書き込む
 
 | 版 | 起動方法 | 特徴 |
 |---|---|---|
-| **デスクトップアプリ版**（`app/`、おすすめ） | Python + tkinter | ドライブを自動検出。選択画面・許可ダイアログなしでボタン 1 つで書き込み |
+| **デスクトップアプリ版**（`app/`、おすすめ） | Windows / Mac のアプリ | ドライブを自動検出。選択画面・許可ダイアログなしでボタン 1 つで書き込み |
 | ブラウザ版（`index.html`） | Chrome / Edge で開くだけ | インストール不要。初回にドライブを選ぶ必要あり |
 
 共通の機能:
@@ -18,7 +18,36 @@ RP2040 / RP2350 基板にファームウェア (`.uf2` / `.bin`) を書き込む
 
 ## デスクトップアプリ版 (`app/`)
 
-### セットアップ
+### ダウンロード
+
+[Releases](https://github.com/pokibon3/RP2xxx_firmware_updater/releases) から zip をダウンロードして展開します。Python のインストールは不要です。
+
+| OS | ファイル | 中身 |
+|---|---|---|
+| Windows 10 / 11 (64bit) | `RP2xxx-Updater-windows.zip` | `RP2xxx Updater.exe`（1 ファイル） |
+| macOS（Apple シリコン） | `RP2xxx-Updater-mac.zip` | `RP2xxx Updater.app` |
+
+Releases に無い最新版は、[Actions](https://github.com/pokibon3/RP2xxx_firmware_updater/actions/workflows/build-app.yml) の各実行結果の Artifacts からも取得できます（GitHub へのログインが必要）。
+
+署名していないため、初回起動時に警告が出ます。
+
+- **Windows:** 「Windows によって PC が保護されました」と出たら「詳細情報」→「実行」
+- **macOS:** 「開けません」と出たら、システム設定 → プライバシーとセキュリティ → 「このまま開く」。
+  初回の書き込み時に「リムーバブルボリューム上のファイルへのアクセス」を求められたら「許可」
+
+### 使い方
+
+1. **デバイス** — USB で挿した基板が自動で一覧に出ます（複数あるときだけ選ぶ）
+2. **ファームウェア** — 「ファームウェアを選択…」「フォルダから…」またはドラッグ＆ドロップ。
+   一覧は新しい順で、最新のファイルが自動で選ばれます
+3. **「書き込み開始」** — 書き込みモードへの切り替え → ドライブ検出 → コピー → 再起動確認まで自動
+
+- 書き込みモードのドライブが既に出ていれば、切り替えずにそのまま書き込みます
+- デバイスが無いときは、BOOTSEL ボタンを押しながら USB を挿すのを待ちます（最大 3 分、「中止」で取り消し）
+- ファイルは書き込み直前に読み直すので、ビルドし直したら「書き込み開始」を押すだけで最新版が書き込まれます
+- 前回のファイル一覧と選んだデバイスは `~/.rp2xxx_updater.json` に保存されます
+
+### ソースから実行
 
 Python 3.10 以上と tkinter が必要です（macOS の Homebrew 版 Python は `brew install python-tk@3.14` などで tkinter を追加）。
 
@@ -35,17 +64,21 @@ python3 -m venv .venv
 | `pyusb` + `libusb-package` | USB リセット（libusb 同梱。無くても 1200bps で切り替え可） |
 | `tkinterdnd2` | ドラッグ＆ドロップ（任意） |
 
-### 使い方
+### アプリのビルド
 
-1. **デバイス** — USB で挿した基板が自動で一覧に出ます（複数あるときだけ選ぶ）
-2. **ファームウェア** — 「ファームウェアを選択…」「フォルダから…」またはドラッグ＆ドロップ。
-   一覧は新しい順で、最新のファイルが自動で選ばれます
-3. **「書き込み開始」** — 書き込みモードへの切り替え → ドライブ検出 → コピー → 再起動確認まで自動
+PyInstaller で単体アプリにします。各 OS 上でビルドしてください（クロスビルド不可）。
 
-- 書き込みモードのドライブが既に出ていれば、切り替えずにそのまま書き込みます
-- デバイスが無いときは、BOOTSEL ボタンを押しながら USB を挿すのを待ちます（最大 3 分、「中止」で取り消し）
-- ファイルは書き込み直前に読み直すので、ビルドし直したら「書き込み開始」を押すだけで最新版が書き込まれます
-- 前回のファイル一覧と選んだデバイスは `~/.rp2xxx_updater.json` に保存されます
+| OS | コマンド | 出力 |
+|---|---|---|
+| Windows | `app\build_win.bat` | `app\dist\RP2xxx Updater.exe` |
+| macOS | `app/build_mac.sh` | `app/dist/RP2xxx Updater.app`、配布用 `app/dist/RP2xxx-Updater-mac.zip` |
+
+GitHub Actions (`.github/workflows/build-app.yml`) でも両 OS 分を自動ビルドします。
+
+| 操作 | 結果 |
+|---|---|
+| `app/` を変更して `main` に push、または Actions 画面から手動実行 | Actions の Artifacts に zip を保存 |
+| `v1.0.0` のようなタグを push (`git tag v1.0.0 && git push origin v1.0.0`) | Releases に zip を添付 |
 
 ### ファイル構成
 
@@ -54,6 +87,9 @@ app/rp2updater.py   画面 (tkinter)
 app/device.py       デバイス一覧・書き込みモードへの切り替え
 app/drive.py        書き込みモードのドライブ検出・コピー
 app/uf2.py          UF2 / BIN の解析・チップ適合チェック・変換
+app/rp2updater.spec PyInstaller 設定
+app/build_mac.sh    macOS 用ビルド
+app/build_win.bat   Windows 用ビルド
 ```
 
 ## ブラウザ版 (`index.html`)
@@ -178,6 +214,7 @@ python3 tools/bin2uf2.py input.bin output.uf2 --family rp2350-arm-s   # rp2040 |
 ## ファイル構成
 
 ```
+.github/workflows/ アプリの自動ビルド (GitHub Actions)
 app/              デスクトップアプリ版 (Python + tkinter)
 index.html        ブラウザ版（単一 HTML）
 samples/          サンプルファームウェア（ソース・ビルドスクリプト・ビルド済み UF2）
