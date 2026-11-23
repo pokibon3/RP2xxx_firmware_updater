@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RP2xxx Firmware Updater</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --fg: #1c2230; --muted: #6b7280; --border: #e2e5ea;
+    --accent: #c51a4a; --accent-fg: #fff; --sel: #fcecf1;
+    --ok: #15803d; --err: #b91c1c; --warn: #b45309; --info: #1d4ed8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #13151a; --card: #1c1f26; --fg: #e6e8ec; --muted: #9aa1ad; --border: #2c313a;
+      --sel: #3a1d27; --ok: #4ade80; --err: #f87171; --warn: #fbbf24; --info: #93c5fd;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.6 system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", "Segoe UI", sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  h2 .num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: 12px; }
+  h2 .opt { font-size: 12px; font-weight: normal; color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    font: inherit; border: 1px solid var(--border); background: var(--card); color: var(--fg);
+    padding: 7px 14px; border-radius: 7px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  button.attn { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 30%, transparent); } }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  a { color: var(--accent); }
+  input[type=file] { display: none; }
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .status.on .dot { background: var(--ok); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin-top: 10px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: var(--mono); word-break: break-all; }
+  .drop { border: 2px dashed var(--border); border-radius: 8px; padding: 18px 14px; text-align: center; color: var(--muted); }
+  .drop.over { border-color: var(--accent); background: var(--sel); }
+  .list { margin-top: 10px; max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .list:empty { display: none; }
+  .item { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; }
+  .item:last-child { border-bottom: 0; }
+  .item:hover { background: var(--sel); }
+  .item.selected { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+  .item .path { font-family: var(--mono); word-break: break-all; }
+  .item .meta { color: var(--muted); white-space: nowrap; }
+  .drive { font-size: 13px; margin-bottom: 12px; }
+  .drive b { font-family: var(--mono); }
+  .progress { height: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin-top: 14px; }
+  .bar { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .bar.done { background: var(--ok); }
+  .bar.error { background: var(--err); }
+  .pinfo { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 13px; }
+  .pinfo .phase { font-weight: 600; }
+  .pinfo .nums { color: var(--muted); font-family: var(--mono); }
+  .log { margin-top: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; height: 170px; overflow: auto; font: 12px/1.5 var(--mono); white-space: pre-wrap; }
+  .log .ok { color: var(--ok); } .log .err { color: var(--err); } .log .warn { color: var(--warn); } .log .info { color: var(--info); }
+  .notice { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--warn); color: var(--warn); margin-bottom: 16px; display: none; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  @media (max-width: 560px) { .item { grid-template-columns: 1fr; gap: 0; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>RP2040 / RP2350 Firmware Updater</h1>
+  <p class="sub">UF2 を書き込みモードのドライブ (RPI-RP2 / RP2350) へコピーして書き込みます（Chrome / Edge、Windows / macOS）。</p>
+
+  <div class="notice" id="notice"></div>
+
+  <!-- 1. Device -->
+  <section>
+    <h2><span class="num">1</span>デバイス <span class="opt">（自動で書き込みモードにする場合）</span></h2>
+    <div class="row">
+      <button class="primary" id="btnDevice">デバイスに接続</button>
+      <span class="status" id="devStatus"><span class="dot"></span><span id="devStatusText">未接続</span></span>
+    </div>
+    <div class="hint">
+      動作中の基板を選ぶと、書き込み時に自動で書き込みモードへ切り替えます。<br>
+      BOOTSEL ボタンを押しながら USB を挿した場合は、ここは不要です。
+    </div>
+  </section>
+
+  <!-- 2. Firmware -->
+  <section>
+    <h2><span class="num">2</span>ファームウェア</h2>
+    <input type="file" id="inFile" accept=".uf2,.bin" multiple>
+    <input type="file" id="inDir" webkitdirectory multiple>
+    <div class="drop" id="drop">
+      <button class="primary" id="btnFw">ファームウェアを選択…</button>
+      <div style="margin-top:8px">.uf2 / .bin をここにドロップしても選べます ・ <a href="#" id="lnkDir">フォルダから選ぶ</a></div>
+    </div>
+    <div class="hint" id="dirInfo"></div>
+    <div class="list" id="fileList"></div>
+    <dl class="kv" id="fwInfo" hidden></dl>
+  </section>
+
+  <!-- 3. Write -->
+  <section>
+    <h2><span class="num">3</span>書き込み</h2>
+    <div class="drive">書き込み先ドライブ: <b id="driveName">未選択</b> <a href="#" id="lnkDrive" hidden>選び直す</a></div>
+    <div class="row">
+      <button class="primary" id="btnWrite" disabled>書き込み開始</button>
+      <button id="btnCancel" hidden>中止</button>
+    </div>
+    <div class="progress"><div class="bar" id="bar"></div></div>
+    <div class="pinfo">
+      <span class="phase" id="phase">待機中</span>
+      <span class="nums" id="nums"></span>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+// ============================================================
+//  Constants
+// ============================================================
+const FAMILY = {
+  RP2040: 0xe48bff56,
+  ABSOLUTE: 0xe48bff57,
+  DATA: 0xe48bff58,
+  RP2350_ARM_S: 0xe48bff59,
+  RP2350_RISCV: 0xe48bff5a,
+  RP2350_ARM_NS: 0xe48bff5b,
+};
+const FAMILY_NAME = Object.fromEntries(Object.entries(FAMILY).map(([k, v]) => [v, k]));
+
+const FLASH_START = 0x10000000;
+const FLASH_END   = 0x11000000;   // 16MB
+const SECTOR = 4096;
+
+const RPI_VID = 0x2e8a;
+const BOOTROM_PIDS = [0x0003, 0x000f];   // RP2040 / RP2350 の書き込みモード
+
+// pico-sdk の Reset インターフェース (vendor class, subclass 0x00, protocol 0x01)
+const RESET_IF = { classCode: 0xff, subclassCode: 0x00, protocolCode: 0x01 };
+const RESET_REQUEST_BOOTSEL = 0x01;
+
+const DRIVE_INFO_FILE = 'INFO_UF2.TXT';
+const DRIVE_OUT_FILE  = 'firmware.uf2';
+
+const hex = (n, w = 8) => '0x' + (n >>> 0).toString(16).padStart(w, '0');
+const fmtBytes = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ============================================================
+//  Firmware image parsing
+// ============================================================
+function parseFirmware(name, ab) {
+  if (/\.uf2$/i.test(name)) return parseUF2(ab);
+  if (/\.bin$/i.test(name)) {
+    if (ab.byteLength > FLASH_END - FLASH_START) throw new Error('BIN がフラッシュ容量 (16MB) を超えています');
+    return { kind: 'BIN', blocks: [{ addr: FLASH_START, family: null, data: new Uint8Array(ab) }], families: new Set() };
+  }
+  throw new Error('対応していない拡張子です (.uf2 / .bin)');
+}
+
+function parseUF2(ab) {
+  if (ab.byteLength === 0 || ab.byteLength % 512) throw new Error('UF2 のサイズが 512 の倍数ではありません');
+  const u8 = new Uint8Array(ab), dv = new DataView(ab);
+  const blocks = [], families = new Set();
+  for (let off = 0; off < ab.byteLength; off += 512) {
+    if (dv.getUint32(off, true) !== 0x0a324655 || dv.getUint32(off + 4, true) !== 0x9e5d5157 ||
+        dv.getUint32(off + 508, true) !== 0x0ab16f30) {
+      throw new Error(`UF2 ブロック #${off / 512} のマジックが不正です`);
+    }
+    const flags = dv.getUint32(off + 8, true);
+    if (flags & 0x1) continue; // NOT_MAIN_FLASH
+    const addr = dv.getUint32(off + 12, true);
+    const size = dv.getUint32(off + 16, true);
+    if (size > 476) throw new Error(`UF2 ブロック #${off / 512} のペイロード長が不正です`);
+    const family = (flags & 0x2000) ? dv.getUint32(off + 28, true) : null;
+    if (family !== null) families.add(family);
+    blocks.push({ addr, family, data: u8.subarray(off + 32, off + 32 + size) });
+  }
+  return { kind: 'UF2', blocks, families };
+}
+
+function familyMatches(family, chip) {
+  if (family === null || family === FAMILY.ABSOLUTE || family === FAMILY.DATA) return true;
+  if (chip === 'RP2040') return family === FAMILY.RP2040;
+  return family === FAMILY.RP2350_ARM_S || family === FAMILY.RP2350_RISCV || family === FAMILY.RP2350_ARM_NS;
+}
+
+/** チップ向けのブロックを検査し、書き込み範囲を返す（不適合なら例外） */
+function checkImage(image, chip) {
+  const blocks = image.blocks.filter(b =>
+    familyMatches(b.family, chip) &&
+    !(b.family === FAMILY.ABSOLUTE && b.addr === 0x10ffff00)); // RP2350-E10 回避用ダミーブロック
+
+  if (blocks.length === 0) {
+    const fams = [...image.families].map(f => FAMILY_NAME[f] ?? hex(f)).join(', ');
+    throw new Error(`このファームウェア (${fams}) は ${chip} 向けではありません`);
+  }
+  let lo = Infinity, hi = 0, bytes = 0;
+  for (const b of blocks) {
+    if (b.addr < FLASH_START || b.addr + b.data.length > FLASH_END) {
+      throw new Error(`フラッシュ範囲外のアドレス ${hex(b.addr)} を含みます（RAM 実行用 UF2 は非対応）`);
+    }
+    lo = Math.min(lo, b.addr); hi = Math.max(hi, b.addr + b.data.length); bytes += b.data.length;
+  }
+  return { lo, hi, bytes };
+}
+
+/** BIN を UF2 に変換 */
+function binToUF2(image, chip) {
+  const family = chip === 'RP2040' ? FAMILY.RP2040 : FAMILY.RP2350_ARM_S;
+  const { addr: base, data } = image.blocks[0];
+  const n = Math.ceil(data.length / 256);
+  const out = new Uint8Array(n * 512), dv = new DataView(out.buffer);
+  for (let i = 0; i < n; i++) {
+    const o = i * 512;
+    dv.setUint32(o, 0x0a324655, true);
+    dv.setUint32(o + 4, 0x9e5d5157, true);
+    dv.setUint32(o + 8, 0x2000, true);           // familyID present
+    dv.setUint32(o + 12, base + i * 256, true);
+    dv.setUint32(o + 16, 256, true);
+    dv.setUint32(o + 20, i, true);
+    dv.setUint32(o + 24, n, true);
+    dv.setUint32(o + 28, family, true);
+    out.set(data.subarray(i * 256, i * 256 + 256), o + 32);
+    dv.setUint32(o + 508, 0x0ab16f30, true);
+  }
+  return out;
+}
+
+// ============================================================
+//  State / UI helpers
+// ============================================================
+const $ = s => document.querySelector(s);
+const state = {
+  app: null,          // Reset インターフェース付きの動作中デバイス (USBDevice)
+  port: null,         // 1200bps タッチ用シリアルポート
+  portInfo: null,     // 再接続時に同じポートを見つけるための VID/PID
+  needSerial: null,   // シリアルポートの許可待ち
+  fw: null, files: [],
+  drive: null,        // 書き込み先ドライブ (FileSystemDirectoryHandle)
+  busy: false,
+  ask: null,          // ユーザーのクリック待ち { label, resolve, reject }
+};
+
+function log(msg, cls = '') {
+  const el = $('#log');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function setKV(el, pairs) {
+  el.replaceChildren();
+  for (const [k, v] of pairs) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    el.append(dt, dd);
+  }
+  el.hidden = pairs.length === 0;
+}
+
+function setProgress(ratio, phase, nums = '', cls = '') {
+  const bar = $('#bar');
+  bar.style.width = `${Math.max(0, Math.min(1, ratio)) * 100}%`;
+  bar.className = 'bar' + (cls ? ' ' + cls : '');
+  $('#phase').textContent = phase;
+  $('#nums').textContent = nums;
+}
+
+function showNotice(text) {
+  const n = $('#notice');
+  n.textContent = text;
+  n.style.display = 'block';
+}
+
+function portLabel(port) {
+  const i = port.getInfo();
+  return i.usbVendorId !== undefined ? `${hex(i.usbVendorId, 4)}:${hex(i.usbProductId, 4)}` : '';
+}
+
+function updateUI() {
+  const ready = !!(state.app || state.port);
+  $('#devStatus').classList.toggle('on', ready);
+  $('#devStatusText').textContent =
+      state.app        ? `${state.app.productName || 'デバイス'} 接続中（USB リセットで自動切替）`
+    : state.port       ? `シリアル ${portLabel(state.port)} 接続中（1200bps で自動切替）`
+    : state.needSerial ? 'シリアルポートの許可待ち'
+    : '未接続';
+  const bd = $('#btnDevice');
+  bd.textContent = state.needSerial ? 'シリアルポートを許可' : ready ? '別のデバイスに接続' : 'デバイスに接続';
+  bd.classList.toggle('primary', !!state.needSerial || !ready);
+  bd.disabled = state.busy;
+
+  $('#driveName').textContent = state.drive ? state.drive.name : '未選択（書き込み時に選択）';
+  $('#lnkDrive').hidden = !state.drive || state.busy;
+  $('#btnFw').disabled = state.busy;
+
+  const bw = $('#btnWrite');
+  if (state.ask) {
+    bw.textContent = state.ask.label;
+    bw.disabled = false;
+    bw.classList.add('attn');
+  } else {
+    bw.textContent = '書き込み開始';
+    bw.disabled = state.busy || !state.fw;
+    bw.classList.remove('attn');
+  }
+  $('#btnCancel').hidden = !state.ask;
+}
+
+/**
+ * ブラウザの許可ダイアログはクリック直後にしか出せないので、
+ * 必要になったら書き込みボタンの表示を変えてクリックを待つ。
+ */
+function askClick(label) {
+  return new Promise((resolve, reject) => {
+    state.ask = { label, resolve, reject };
+    setProgress(parseFloat($('#bar').style.width) / 100 || 0, `「${label}」を押してください`);
+    updateUI();
+  });
+}
+
+// ============================================================
+//  Drive handle persistence (IndexedDB)
+// ============================================================
+function idb(mode, fn) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('rp2xxx-updater', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const tx = req.result.transaction('kv', mode);
+      const r = fn(tx.objectStore('kv'));
+      tx.oncomplete = () => resolve(r?.result);
+      tx.onerror = () => reject(tx.error);
+    };
+  });
+}
+const saveDrive  = h => idb('readwrite', s => s.put(h, 'drive')).catch(() => {});
+const loadDrive  = () => idb('readonly', s => s.get('drive')).catch(() => null);
+const forgetDrive = () => idb('readwrite', s => s.delete('drive')).catch(() => {});
+
+// ============================================================
+//  Drive operations
+// ============================================================
+/** ドライブの INFO_UF2.TXT を読む（書き込みドライブでなければ null） */
+async function readDriveInfo(dir) {
+  try {
+    const text = await (await (await dir.getFileHandle(DRIVE_INFO_FILE)).getFile()).text();
+    const board = (text.match(/Board-ID:\s*(.+)/) || [])[1]?.trim() || '?';
+    return { board, chip: /RP2350/i.test(text) ? 'RP2350' : 'RP2040' };
+  } catch {
+    return null;
+  }
+}
+
+/** 記憶済みドライブが現れる（＋書き込み許可が得られる）まで待つ */
+async function waitForDrive(dir, timeoutMs) {
+  const t0 = performance.now();
+  let asked = false;
+  while (performance.now() - t0 < timeoutMs) {
+    let perm;
+    try { perm = await dir.queryPermission({ mode: 'readwrite' }); } catch { perm = 'prompt'; }
+    if (perm !== 'granted') {
+      if (!asked) {
+        await sleep(Math.max(0, 2500 - (performance.now() - t0))); // ドライブのマウント待ち
+        await askClick('ドライブへの書き込みを許可');
+        asked = true;
+      }
+      try { perm = await dir.requestPermission({ mode: 'readwrite' }); } catch { perm = 'error'; }
+      if (perm === 'denied') throw new Error('ドライブへの書き込みが許可されませんでした');
+      if (perm !== 'granted') { await sleep(500); continue; }
+    }
+    const info = await readDriveInfo(dir);
+    if (info) return info;
+    await sleep(300);
+  }
+  return null;
+}
+
+/** 書き込み先ドライブを用意する（記憶済みなら待つ、無ければ選んでもらう） */
+async function acquireDrive(justReset) {
+  if (state.drive) {
+    setProgress(0.03, 'ドライブを待っています…', state.drive.name);
+    const info = await waitForDrive(state.drive, justReset ? 15000 : 4000);
+    if (info) return { dir: state.drive, info };
+    log(`ドライブ「${state.drive.name}」が見つかりません。` +
+        (justReset ? '' : 'BOOTSEL ボタンを押しながら USB を挿すか、①でデバイスに接続してください。'), 'warn');
+  } else if (justReset) {
+    await sleep(2000); // マウント待ち
+  }
+  for (;;) {
+    log('書き込み先のドライブ (RPI-RP2 / RP2350) を選んでください。次回からは自動で使います。', 'info');
+    if (/Mac/i.test(navigator.platform)) {
+      log('Mac で一覧に出ない場合: 選択画面で ⌘ + Shift + G を押し、/Volumes/RPI-RP2（RP2350 は /Volumes/RP2350）と入力して「開く」', 'info');
+    }
+    await askClick('書き込み先ドライブを選択');
+    let dir;
+    try {
+      dir = await window.showDirectoryPicker({ id: 'rp2drive', mode: 'readwrite' });
+    } catch (e) {
+      if (e.name === 'AbortError') continue; // 選択キャンセル → もう一度ボタン待ち（中止ボタンで抜ける）
+      throw e;
+    }
+    const info = await readDriveInfo(dir);
+    if (info) {
+      state.drive = dir;
+      saveDrive(dir);
+      updateUI();
+      return { dir, info };
+    }
+    log(`「${dir.name}」は書き込みモードのドライブではありません（${DRIVE_INFO_FILE} がありません）`, 'warn');
+  }
+}
+
+/** UF2 をドライブへコピーし、デバイスの再起動（＝ドライブ消失）まで待つ */
+async function copyToDrive(dir, data) {
+  const fh = await dir.getFileHandle(DRIVE_OUT_FILE, { create: true });
+  const w = await fh.createWritable({ keepExistingData: false });
+  const CHUNK = 32 * 1024, total = data.length, t0 = performance.now();
+  for (let off = 0; off < total; off += CHUNK) {
+    const end = Math.min(off + CHUNK, total);
+    await w.write(data.subarray(off, end));
+    const speed = end / ((performance.now() - t0) / 1000);
+    setProgress(0.05 + 0.75 * end / total, 'コピー中…',
+      `${fmtBytes(end)} / ${fmtBytes(total)}  ${(speed / 1024).toFixed(0)} KB/s`);
+  }
+  setProgress(0.85, 'フラッシュに書き込み中…', 'デバイスが再起動するまでお待ちください');
+  let closeErr = null;
+  try { await w.close(); } catch (e) { closeErr = e; } // 書き込み完了で再起動してドライブが消えると失敗することがある
+
+  // 書き込みが完了するとデバイスが再起動してドライブが消える
+  const t1 = performance.now();
+  while (performance.now() - t1 < 30000) {
+    if (!(await readDriveInfo(dir))) return;
+    setProgress(0.85 + 0.14 * Math.min(1, (performance.now() - t1) / 10000), 'フラッシュに書き込み中…',
+      'デバイスが再起動するまでお待ちください');
+    await sleep(300);
+  }
+  throw new Error(closeErr
+    ? `コピーに失敗しました: ${closeErr.message}`
+    : 'デバイスが再起動しませんでした（UF2 の内容が書き込まれていない可能性があります）');
+}
+
+// ============================================================
+//  Device: switch to bootloader
+// ============================================================
+function findResetInterface(dev) {
+  for (const intf of dev.configuration?.interfaces ?? []) {
+    const a = intf.alternates[0];
+    if (a.interfaceClass === RESET_IF.classCode && a.interfaceSubclass === RESET_IF.subclassCode &&
+        a.interfaceProtocol === RESET_IF.protocolCode) return intf.interfaceNumber;
+  }
+  return null;
+}
+const hasCdc = dev => (dev.configuration?.interfaces ?? []).some(i => i.alternates[0].interfaceClass === 0x02);
+
+/** 書き込みモード (BOOTROM) か。アプリが同じ VID:PID を使うこともあるのでインターフェース構成も確認 */
+function isBootrom(dev) {
+  if (dev.vendorId !== RPI_VID || !BOOTROM_PIDS.includes(dev.productId)) return false;
+  const intfs = dev.configuration?.interfaces;
+  if (!intfs) return true;
+  return intfs.every(i => [0x08, 0xff].includes(i.alternates[0].interfaceClass));
+}
+
+/** ①のボタン */
+function onDeviceButton() {
+  if (state.needSerial) return requestSerialFor(state.needSerial);
+  return selectDevice();
+}
+
+/**
+ * デバイスを選択し、書き込みモードへの切り替え手段を自動判定:
+ *   Reset インターフェース → USB リセット / CDC → 1200bps タッチ
+ */
+async function selectDevice() {
+  let dev;
+  try {
+    dev = await navigator.usb.requestDevice({ filters: [RESET_IF, { vendorId: RPI_VID }] });
+  } catch (e) {
+    if (e.name !== 'NotFoundError') log(`デバイス選択エラー: ${e.message}`, 'err');
+    return;
+  }
+  state.app = null; state.port = null; state.portInfo = null; state.needSerial = null;
+  const name = dev.productName || `${hex(dev.vendorId, 4)}:${hex(dev.productId, 4)}`;
+
+  if (isBootrom(dev)) {
+    log(`${name} は既に書き込みモードです。そのまま「書き込み開始」を押してください。`, 'ok');
+  } else if (findResetInterface(dev) !== null) {
+    state.app = dev;
+    log(`${name} に接続しました（USB リセットで書き込みモードへ切り替えます）`, 'ok');
+  } else if (dev.productId === 0x000c || !hasCdc(dev) || !('serial' in navigator)) {
+    log(`${name} は自動で書き込みモードに切り替えられません。` +
+        'BOOTSEL ボタンを押しながら USB を挿し直してから「書き込み開始」を押してください。', 'warn');
+  } else {
+    const target = { usbVendorId: dev.vendorId, usbProductId: dev.productId, name };
+    const port = (await navigator.serial.getPorts()).find(p => sameUsb(p.getInfo(), target));
+    if (port) useSerialPort(port, name);
+    else await requestSerialFor(target);
+  }
+  updateUI();
+}
+
+const sameUsb = (a, b) => a.usbVendorId === b.usbVendorId && a.usbProductId === b.usbProductId;
+
+function useSerialPort(port, name) {
+  state.port = port;
+  state.portInfo = port.getInfo();
+  state.needSerial = null;
+  log(`${name} に接続しました（1200bps で書き込みモードへ切り替えます）`, 'ok');
+}
+
+async function requestSerialFor(target) {
+  try {
+    const port = await navigator.serial.requestPort({
+      filters: [{ usbVendorId: target.usbVendorId, usbProductId: target.usbProductId }],
+    });
+    useSerialPort(port, target.name);
+  } catch (e) {
+    if (e.name === 'SecurityError' || e.name === 'NotAllowedError') {
+      state.needSerial = target; // ユーザー操作が切れた: もう一度ボタンを押してもらう
+      log('シリアルポートの許可が必要です。「シリアルポートを許可」を押してください。', 'warn');
+    } else {
+      state.needSerial = null;
+      if (e.name !== 'NotFoundError') log(`シリアルポートエラー: ${e.message}`, 'err');
+    }
+  }
+  updateUI();
+}
+
+/** Reset インターフェースに BOOTSEL リクエストを送る */
+async function resetViaVendor(dev) {
+  let onGone;
+  const gone = new Promise(res => {
+    onGone = e => { if (e.device === dev) res(true); };
+    navigator.usb.addEventListener('disconnect', onGone);
+  });
+  try {
+    if (!dev.opened) await dev.open();
+    if (dev.configuration === null) await dev.selectConfiguration(1);
+    const itf = findResetInterface(dev);
+    if (itf === null) throw new Error('Reset インターフェースが見つかりません');
+    await dev.claimInterface(itf);
+    try {
+      // 'vendor' 型だと TinyUSB が tud_vendor_control_xfer_cb に回して STALL する。picotool と同じ 'class' 型で送る
+      await dev.controlTransferOut({
+        requestType: 'class', recipient: 'interface', request: RESET_REQUEST_BOOTSEL, value: 0, index: itf,
+      });
+    } catch { /* 即座に再起動すると転送がエラーになる（正常） */ }
+    const reset = await Promise.race([gone, sleep(3000).then(() => false)]);
+    if (!reset) {
+      try { await dev.close(); } catch {}
+      throw new Error('デバイスがリセット要求に応答しませんでした');
+    }
+  } finally {
+    navigator.usb.removeEventListener('disconnect', onGone);
+  }
+}
+
+/** 1200bps で開いて DTR を落として閉じる（pico-sdk stdio_usb / arduino-pico） */
+async function touch1200(port) {
+  try {
+    await port.open({ baudRate: 1200 });
+  } catch (e) {
+    if (e.name !== 'InvalidStateError') throw new Error(`シリアルポートを開けません（他のアプリが使用中？）: ${e.message}`);
+  }
+  try {
+    await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+    await sleep(50);
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+    await sleep(50);
+  } catch {}
+  try { await port.close(); } catch {}
+}
+
+async function enterBootloader() {
+  setProgress(0.01, '書き込みモードへ切り替え中…');
+  if (state.app) {
+    log('USB リセットで書き込みモードへ切り替えます…', 'info');
+    await resetViaVendor(state.app);
+  } else {
+    log('1200bps で書き込みモードへ切り替えます…', 'info');
+    await touch1200(state.port);
+  }
+}
+
+// ============================================================
+//  Write
+// ============================================================
+async function startWrite() {
+  const fw = state.fw;
+  if (!fw || state.busy) return;
+  if (!window.showDirectoryPicker) { log('このブラウザはドライブへの書き込みに対応していません（Chrome / Edge を使用してください）', 'err'); return; }
+  state.busy = true; updateUI();
+  const t0 = performance.now();
+  try {
+    // 記憶済みドライブの許可は、クリック直後（ブラウザが許可ダイアログを出せるうち）に取っておく
+    if (state.drive) {
+      try {
+        if (await state.drive.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+          await state.drive.requestPermission({ mode: 'readwrite' });
+        }
+      } catch {}
+    }
+
+    const justReset = !!(state.app || state.port);
+    if (justReset) await enterBootloader();
+
+    const { dir, info } = await acquireDrive(justReset);
+    log(`ドライブ: ${dir.name} (${info.chip}, Board-ID: ${info.board})`, 'info');
+
+    const range = checkImage(fw.image, info.chip);
+    const data = fw.image.kind === 'UF2' ? new Uint8Array(await fw.file.arrayBuffer()) : binToUF2(fw.image, info.chip);
+    log(`書き込み開始: ${pathOf(fw.file)} → ${info.chip} (${hex(range.lo)}–${hex(range.hi)}, ${fmtBytes(range.bytes)})`, 'info');
+
+    await copyToDrive(dir, data);
+
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    setProgress(1, '完了', `${fmtBytes(data.length)} / ${secs}s`, 'done');
+    log(`完了しました。デバイスは新しいファームウェアで起動しています (${secs}s)`, 'ok');
+  } catch (e) {
+    setProgress(1, 'エラー', e.message, 'error');
+    log(`エラー: ${e.message}`, 'err');
+  } finally {
+    state.ask = null;
+    state.busy = false;
+    updateUI();
+  }
+}
+
+function onWriteButton() {
+  if (state.ask) {
+    const a = state.ask;
+    state.ask = null;
+    updateUI();
+    a.resolve();   // 続きの処理はこのクリックの直後に動くので許可ダイアログを出せる
+    return;
+  }
+  startWrite();
+}
+
+function onCancel() {
+  if (!state.ask) return;
+  const a = state.ask;
+  state.ask = null;
+  a.reject(new Error('中止しました'));
+}
+
+// ============================================================
+//  Firmware selection
+// ============================================================
+const pathOf = f => f._path || f.webkitRelativePath || f.name;
+
+function renderFileList() {
+  const list = $('#fileList');
+  list.replaceChildren();
+  if (state.files.length < 2) return;
+  for (const f of state.files) {
+    const item = document.createElement('div');
+    item.className = 'item' + (state.fw && state.fw.file === f ? ' selected' : '');
+    const p = document.createElement('span'); p.className = 'path'; p.textContent = pathOf(f);
+    const s = document.createElement('span'); s.className = 'meta'; s.textContent = fmtBytes(f.size);
+    const t = document.createElement('span'); t.className = 'meta'; t.textContent = new Date(f.lastModified).toLocaleString();
+    item.append(p, s, t);
+    item.onclick = () => { if (!state.busy) selectFile(f); };
+    list.appendChild(item);
+  }
+}
+
+/** ファイル群から .uf2/.bin を一覧にし、最新のものを自動選択 */
+function setFileList(fileList) {
+  state.files = [...fileList]
+    .filter(f => /\.(uf2|bin)$/i.test(f.name))
+    .sort((a, b) => b.lastModified - a.lastModified);
+  const n = state.files.length;
+  $('#dirInfo').textContent = n > 1 ? `${n} 個のファームウェア（新しい順）。クリックで切り替え` : '';
+  renderFileList();
+  if (n === 0) { log('.uf2 / .bin が見つかりません', 'warn'); return; }
+  selectFile(state.files[0]);
+}
+
+/**
+ * ドロップされたファイル / フォルダを展開。
+ * file:// で開いている場合、Chrome はフォルダ内ファイルの読み出しを拒否するので
+ * ファイルは dataTransfer.files から取り、フォルダだけ展開を試みる。
+ */
+async function filesFromDrop(dt) {
+  const plain = [...dt.files].filter(f => /\.(uf2|bin)$/i.test(f.name));
+  const dirs = [...dt.items].map(i => i.webkitGetAsEntry?.()).filter(e => e?.isDirectory);
+  const out = [...plain];
+  const walk = async (entry, prefix) => {
+    if (entry.isFile) {
+      if (!/\.(uf2|bin)$/i.test(entry.name)) return;
+      const f = await new Promise((res, rej) => entry.file(res, rej));
+      f._path = prefix + f.name;
+      out.push(f);
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (batch.length === 0) break;
+        for (const e of batch) await walk(e, `${prefix}${entry.name}/`);
+      }
+    }
+  };
+  for (const d of dirs) {
+    try { await walk(d, ''); }
+    catch { throw new Error('このページの開き方ではフォルダのドロップが使えません。「フォルダから選ぶ」を使ってください'); }
+  }
+  return out;
+}
+
+async function selectFile(file) {
+  try {
+    const image = parseFirmware(file.name, await file.arrayBuffer());
+    state.fw = { file, image };
+    log(`ファームウェアを選択: ${pathOf(file)}`, 'info');
+    refreshFwInfo();
+  } catch (e) {
+    state.fw = null;
+    setKV($('#fwInfo'), []);
+    log(`読み込みエラー (${file.name}): ${e.message}`, 'err');
+  }
+  renderFileList();
+  updateUI();
+}
+
+function refreshFwInfo() {
+  const { file, image } = state.fw;
+  const fams = [...image.families];
+  const chip = fams.includes(FAMILY.RP2040) ? 'RP2040'
+             : fams.some(f => familyMatches(f, 'RP2350') && f !== FAMILY.ABSOLUTE && f !== FAMILY.DATA) ? 'RP2350'
+             : null;
+  const pairs = [
+    ['ファイル', pathOf(file)],
+    ['形式', image.kind],
+    ['サイズ', fmtBytes(file.size)],
+    ['対象', chip ?? (image.kind === 'BIN' ? 'RP2040 / RP2350（書き込み先に合わせて変換）' : '不明')],
+  ];
+  if (fams.length) pairs.push(['ファミリ', fams.map(f => FAMILY_NAME[f] ?? hex(f)).join(', ')]);
+  try {
+    const r = checkImage(image, chip ?? 'RP2040');
+    pairs.push(['書き込み範囲', `${hex(r.lo)} – ${hex(r.hi)}`]);
+  } catch (e) {
+    pairs.push(['警告', e.message]);
+  }
+  setKV($('#fwInfo'), pairs);
+}
+
+// ============================================================
+//  Init
+// ============================================================
+function init() {
+  if (!window.showDirectoryPicker) {
+    showNotice('このブラウザはドライブへの書き込みに対応していません。Chrome または Edge で開いてください。');
+  }
+
+  $('#btnDevice').onclick = onDeviceButton;
+  $('#btnWrite').onclick = onWriteButton;
+  $('#btnCancel').onclick = onCancel;
+  $('#btnFw').onclick = () => $('#inFile').click();
+  $('#lnkDir').onclick = e => { e.preventDefault(); if (!state.busy) $('#inDir').click(); };
+  $('#lnkDrive').onclick = e => {
+    e.preventDefault();
+    if (state.busy) return;
+    state.drive = null;
+    forgetDrive();
+    log('次回の書き込み時にドライブを選び直します');
+    updateUI();
+  };
+  $('#inFile').onchange = e => { if (e.target.files.length) setFileList(e.target.files); e.target.value = ''; };
+  $('#inDir').onchange  = e => { if (e.target.files.length) setFileList(e.target.files); e.target.value = ''; };
+
+  const drop = $('#drop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = async e => {
+    e.preventDefault(); drop.classList.remove('over');
+    if (state.busy) return;
+    try { setFileList(await filesFromDrop(e.dataTransfer)); }
+    catch (err) { log(`ドロップの読み込みエラー: ${err.message}`, 'err'); }
+  };
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => e.preventDefault());
+  window.addEventListener('beforeunload', e => { if (state.busy) { e.preventDefault(); e.returnValue = ''; } });
+
+  if ('usb' in navigator) {
+    // 書き込み後に再起動して戻ってきたデバイスを再び選択状態に
+    navigator.usb.addEventListener('connect', e => {
+      if (!state.app && !state.port && findResetInterface(e.device) !== null) { state.app = e.device; updateUI(); }
+    });
+    navigator.usb.addEventListener('disconnect', e => {
+      if (e.device === state.app) { state.app = null; updateUI(); }
+    });
+    navigator.usb.getDevices().then(devs => {
+      const app = devs.find(d => findResetInterface(d) !== null);
+      if (app && !state.app) {
+        state.app = app;
+        log(`${app.productName || 'デバイス'} に自動接続しました`, 'ok');
+        updateUI();
+      }
+    });
+  }
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('connect', e => {
+      if (!state.app && state.portInfo && sameUsb(e.target.getInfo(), state.portInfo)) { state.port = e.target; updateUI(); }
+    });
+    navigator.serial.addEventListener('disconnect', e => {
+      if (!state.busy && e.target === state.port) { state.port = null; updateUI(); }
+    });
+  }
+
+  loadDrive().then(h => {
+    if (h && !state.drive) { state.drive = h; log(`前回のドライブを使用: ${h.name}`); updateUI(); }
+  });
+
+  updateUI();
+  log('準備完了');
+}
+
+init();
+</script>
+</body>
+</html>
