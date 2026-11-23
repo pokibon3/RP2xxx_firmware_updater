@@ -1,6 +1,8 @@
 # PyInstaller spec — macOS: dist/mac/RP2xxx Updater.app / Windows: dist/win/RP2xxx Updater.exe
 #   build_mac.sh / build_win.bat から --distpath dist/mac|win を付けて実行
 import sys
+sys.path.insert(0, '.')
+from version import __version__
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
 
 APP_NAME = 'RP2xxx Updater'
@@ -31,7 +33,8 @@ if sys.platform == 'darwin':
         bundle_identifier='io.github.pokibon3.rp2xxx-updater',
         info_plist={
             'CFBundleDisplayName': APP_NAME,
-            'CFBundleShortVersionString': '1.0.0',
+            'CFBundleShortVersionString': __version__,
+            'CFBundleVersion': __version__,
             'NSHighResolutionCapable': True,
             'NSRemovableVolumesUsageDescription':
                 '書き込みモードの基板 (RPI-RP2 / RP2350 ドライブ) にファームウェアを書き込むために使用します。',

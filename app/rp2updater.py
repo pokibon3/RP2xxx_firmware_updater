@@ -20,6 +20,7 @@ from tkinter.scrolledtext import ScrolledText
 import device
 import drive
 import uf2
+from version import __version__
 
 APP_TITLE = 'RP2040 / RP2350 ファームウェア書き込み'
 CONFIG_PATH = Path.home() / '.rp2xxx_updater.json'
@@ -70,7 +71,7 @@ class App:
         self.config = self._load_config()
         self.want_device_key: str | None = self.config.get('device')
 
-        root.title(APP_TITLE)
+        root.title(f'{APP_TITLE}  v{__version__}')
         root.minsize(640, 600)
         self._build()
         self._restore()
@@ -92,7 +93,10 @@ class App:
         main.pack(fill='both', expand=True)
         main.columnconfigure(0, weight=1)
 
-        ttk.Label(main, text=APP_TITLE, style='Title.TLabel').grid(row=0, column=0, sticky='w', pady=(0, 12))
+        head = ttk.Frame(main)
+        head.grid(row=0, column=0, sticky='ew', pady=(0, 12))
+        ttk.Label(head, text=APP_TITLE, style='Title.TLabel').pack(side='left')
+        ttk.Label(head, text=f'v{__version__}', style='Sub.TLabel').pack(side='left', padx=(8, 0), pady=(4, 0))
 
         # ① デバイス
         f1 = ttk.Frame(main)
@@ -485,6 +489,7 @@ class App:
         files = [p for p in self.config.get('files', []) if os.path.isfile(p)]
         if files:
             self._set_files(files, self.config.get('base_dir'), self.config.get('file'))
+        self.log(f'RP2xxx Updater v{__version__}')
         self.log('ファームウェアを選んで「書き込み開始」を押してください')
 
     def _on_close(self):
